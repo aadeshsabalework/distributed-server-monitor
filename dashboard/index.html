@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+        content="Real-time distributed server resource monitor — track CPU, memory, disk, and network across all your containers from a single dashboard." />
+  <title>Server Resource Monitor</title>
+
+  <!-- Google Fonts: Inter (UI) + JetBrains Mono (values) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+
+  <!-- Chart.js 4 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  HEADER                                  ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <header id="app-header">
+    <div class="header-inner">
+
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">◈</span>
+        <h1>Server Resource Monitor</h1>
+      </div>
+
+      <div class="header-meta">
+        <div id="summary-badges" aria-live="polite">
+          <span class="badge badge-online" id="badge-online">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span id="online-count">0</span>&nbsp;online
+          </span>
+          <span class="badge badge-offline" id="badge-offline">
+            <span class="static-dot" aria-hidden="true"></span>
+            <span id="offline-count">0</span>&nbsp;offline
+          </span>
+          <span class="badge badge-alert" id="badge-alert" aria-live="polite" hidden>
+            <span aria-hidden="true">⚠</span>
+            <span id="alert-count">0</span>&nbsp;alert<span id="alert-plural">s</span>
+          </span>
+        </div>
+
+        <div class="last-updated" aria-live="polite">
+          Updated&nbsp;<time id="last-updated-time">—</time>
+        </div>
+
+        <!-- Header action buttons -->
+        <div class="header-actions">
+          <button id="btn-refresh" class="hdr-btn" aria-label="Refresh data now" title="Refresh">
+            <span class="btn-icon" aria-hidden="true" id="refresh-icon">↻</span>
+            <span class="btn-label">Refresh</span>
+          </button>
+          <button id="btn-settings" class="hdr-btn" aria-label="Open alert threshold settings" title="Settings">
+            <span class="btn-icon" aria-hidden="true">⚙</span>
+            <span class="btn-label">Settings</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  ERROR BANNER (shown when API is down)   ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <div id="error-banner" class="error-banner hidden" role="alert" aria-atomic="true">
+    <span class="error-icon" aria-hidden="true">⚠</span>
+    Cannot reach the API &mdash; retrying every 5 s…
+  </div>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  ALERTS PANEL                            ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <section id="alerts-panel" class="alerts-panel hidden" aria-label="Active resource alerts">
+    <div class="alerts-inner">
+      <h2 class="alerts-title">
+        <span aria-hidden="true">⚠</span>
+        Active Alerts
+      </h2>
+      <ul id="alerts-list" class="alerts-list" aria-live="polite"></ul>
+    </div>
+  </section>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  LEGEND                                  ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <div class="chart-legend" aria-hidden="true">
+    <span class="legend-dot cpu"></span>CPU &nbsp;
+    <span class="legend-dot mem"></span>Memory
+  </div>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  SERVER GRID                             ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <main id="server-grid" aria-label="Server monitoring cards">
+    <div class="empty-state" id="loading-state">
+      <div class="spinner" aria-label="Loading"></div>
+      <p>Connecting to API&hellip;</p>
+    </div>
+  </main>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  SERVER DETAIL PANEL (slide-in)          ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <div id="detail-backdrop" class="backdrop hidden" aria-hidden="true"></div>
+  <aside id="detail-panel" class="detail-panel hidden"
+         role="dialog" aria-modal="true" aria-label="Server details"
+         tabindex="-1">
+    <div class="panel-header">
+      <h2 class="panel-title" id="detail-title">Server Details</h2>
+      <button id="btn-close-detail" class="close-btn" aria-label="Close server details">✕</button>
+    </div>
+    <div id="detail-body" class="panel-body"></div>
+  </aside>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  SETTINGS MODAL                          ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <div id="settings-backdrop" class="backdrop hidden" aria-hidden="true"></div>
+  <div id="settings-modal" class="modal hidden"
+       role="dialog" aria-modal="true" aria-labelledby="settings-heading"
+       tabindex="-1">
+    <div class="modal-header">
+      <h2 class="modal-title" id="settings-heading">Alert Thresholds</h2>
+      <button id="btn-close-settings" class="close-btn" aria-label="Close settings">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-hint">
+        An alert is raised when a resource stays above its threshold.
+        Changes take effect immediately and persist across restarts.
+      </p>
+
+      <div class="field-group">
+        <label for="input-cpu" class="field-label">CPU threshold (%)</label>
+        <input id="input-cpu" class="field-input" type="number"
+               min="1" max="100" step="1" value="80"
+               aria-describedby="cpu-hint" />
+        <span class="field-hint" id="cpu-hint">1 – 100</span>
+      </div>
+
+      <div class="field-group">
+        <label for="input-mem" class="field-label">Memory threshold (%)</label>
+        <input id="input-mem" class="field-input" type="number"
+               min="1" max="100" step="1" value="80"
+               aria-describedby="mem-hint" />
+        <span class="field-hint" id="mem-hint">1 – 100</span>
+      </div>
+
+      <div id="settings-feedback" class="settings-feedback" role="status" aria-live="polite"></div>
+
+      <div class="modal-actions">
+        <button id="btn-cancel-settings" class="btn-secondary">Cancel</button>
+        <button id="btn-save-settings" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ╔══════════════════════════════════════════╗ -->
+  <!-- ║  ALERT DETAIL MODAL                      ║ -->
+  <!-- ╚══════════════════════════════════════════╝ -->
+  <div id="alert-detail-backdrop" class="backdrop hidden" aria-hidden="true"></div>
+  <div id="alert-detail-modal" class="modal hidden"
+       role="dialog" aria-modal="true" aria-labelledby="alert-detail-heading"
+       tabindex="-1">
+    <div class="modal-header">
+      <h2 class="modal-title" id="alert-detail-heading">Alert Details</h2>
+      <button id="btn-close-alert-detail" class="close-btn" aria-label="Close alert details">✕</button>
+    </div>
+    <div id="alert-detail-body" class="modal-body"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# agent/requirements.txt
+# Python dependencies for the monitoring agent.
+
+psutil>=5.9
+requests>=2.31

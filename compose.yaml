@@ -1,0 +1,74 @@
+# compose.yaml
+# Docker Compose v2 — Distributed Server Resource Monitor
+#
+# Changes from original:
+#   - POLL_INTERVAL lowered to 5 s (tighter fault detection)
+#   - OFFLINE_THRESHOLD lowered to 20 s (4 missed reports = offline)
+#   - CPU_ALERT_THRESHOLD / MEM_ALERT_THRESHOLD env vars added
+#   - container_name removed from agent (fixed name blocks --scale)
+#   - deploy.replicas removed from agent (use --scale at runtime instead)
+#
+# Useful commands — see README.md for the full list
+#   Start:              docker compose up --build -d
+#   Scale to 5 agents:  docker compose up --scale agent=5 -d
+#   View logs:          docker compose logs -f
+#   Stop:               docker compose down
+
+services:
+
+  # ── Central API + Dashboard ─────────────────────────────────────────────────
+  api:
+    build:
+      # Use project root as build context so the Dockerfile can COPY dashboard/
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: monitor-api
+    ports:
+      - "5000:5000"           # Dashboard and REST API reachable at localhost:5000
+    volumes:
+      - ./data:/data          # Bind-mount for persistent SQLite (visible from host)
+    environment:
+      # Seconds since last heartbeat before a server is marked offline.
+      # Must be > POLL_INTERVAL.  Default: 20 s (4× a 5 s poll).
+      - OFFLINE_THRESHOLD=20
+
+      # Alert thresholds (percentage 0-100).  Override to tune sensitivity.
+      - CPU_ALERT_THRESHOLD=80
+      - MEM_ALERT_THRESHOLD=80
+    healthcheck:
+      # Uses Python (always present in the image) to avoid needing curl
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── Monitoring Agents ───────────────────────────────────────────────────────
+  # Each replica runs inside its own container and monitors that container's
+  # own CPU, memory, disk, and network.
+  #
+  # Scaling:
+  #   docker compose up --scale agent=3 -d   (start / keep 3 agents)
+  #   docker compose up --scale agent=5 -d   (add two more)
+  #
+  # No container_name here — a fixed name prevents multiple replicas from
+  # starting.  Docker Compose auto-names replicas: <project>-agent-1, -2, …
+  # No deploy.replicas here — use --scale at runtime for flexibility.
+  agent:
+    build: ./agent
+    depends_on:
+      api:
+        condition: service_healthy   # Wait for API health-check before starting
+    environment:
+      - API_URL=http://api:5000
+      # Reporting interval in seconds.  Should be much less than OFFLINE_THRESHOLD.
+      - POLL_INTERVAL=5
+      # Max seconds to wait for the API to become reachable at agent startup.
+      - STARTUP_TIMEOUT=60
+    restart: unless-stopped
+    # No host port mapping — agents only need internal Docker network access.

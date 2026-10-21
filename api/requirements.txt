@@ -1,0 +1,6 @@
+# api/requirements.txt
+# Python dependencies for the Flask API service.
+
+flask>=3.0
+flask-cors>=4.0
+gunicorn>=21.0
